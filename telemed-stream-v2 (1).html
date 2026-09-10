@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Телемед-трансляция (бета v2)</title>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<style>
+  :root{
+    --bg:#0f1419; --panel:#1a2029; --line:#2a333f; --text:#e6edf3;
+    --muted:#8b98a5; --accent:#2f81f7; --accent-hover:#1f6fe0;
+    --ok:#2ea043; --warn:#d29922; --danger:#da3633; --radius:10px;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    min-height:100vh; display:flex; flex-direction:column; align-items:center;
+    padding:24px 16px;
+  }
+  .wrap{width:100%; max-width:1000px}
+  header{display:flex; align-items:center; gap:12px; margin-bottom:8px}
+  header h1{font-size:19px; margin:0; font-weight:600}
+  .beta{font-size:11px; background:var(--warn); color:#1a1200; padding:2px 8px;
+    border-radius:20px; font-weight:700; letter-spacing:.3px}
+  .role{font-size:13px; color:var(--muted); margin-bottom:20px}
+  .card{background:var(--panel); border:1px solid var(--line);
+    border-radius:var(--radius); padding:20px; margin-bottom:16px}
+  .choose{display:flex; gap:12px; flex-wrap:wrap}
+  button{
+    font-size:15px; font-weight:600; border:none; border-radius:8px;
+    padding:12px 18px; cursor:pointer; background:var(--accent); color:#fff;
+    transition:background .15s;
+  }
+  button:hover{background:var(--accent-hover)}
+  button:disabled{opacity:.5; cursor:not-allowed}
+  button.secondary{background:#262d38; color:var(--text); border:1px solid var(--line)}
+  button.secondary:hover{background:#2f3846}
+  button.danger{background:var(--danger)}
+  .choose button{flex:1; min-width:220px; padding:22px 18px; text-align:left; line-height:1.4}
+  .choose button b{display:block; font-size:16px; margin-bottom:4px}
+  .choose button span{font-size:12.5px; opacity:.8; font-weight:400}
+  .stage{position:relative; width:100%; background:#000; border-radius:8px; overflow:hidden; aspect-ratio:16/9}
+  .stage video, .stage canvas{position:absolute; inset:0; width:100%; height:100%}
+  .stage video{object-fit:contain}
+  #measureCanvas{object-fit:contain; cursor:crosshair; touch-action:none}
+  .linkbox{display:flex; gap:8px; margin-top:14px}
+  .linkbox input{flex:1; background:#0b0f14; border:1px solid var(--line);
+    color:var(--text); padding:11px 12px; border-radius:8px; font-size:13px; font-family:monospace}
+  .status{font-size:13px; padding:10px 12px; border-radius:8px; margin-top:12px;
+    background:#0b0f14; border:1px solid var(--line); color:var(--muted)}
+  .status.ok{border-color:var(--ok); color:#7ee787}
+  .status.warn{border-color:var(--warn); color:#e3b341}
+  .status.err{border-color:var(--danger); color:#ff7b72}
+  .controls{display:flex; gap:8px; margin-top:12px; flex-wrap:wrap}
+  .controls button{padding:9px 14px; font-size:13px}
+  .toolpanel{margin-top:14px; padding:14px; background:#0b0f14; border:1px solid var(--line); border-radius:8px}
+  .toolpanel h3{margin:0 0 10px; font-size:13px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.5px}
+  .toolrow{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px}
+  .toolrow:last-child{margin-bottom:0}
+  .calib-val{font-size:13px; color:var(--text)}
+  .calib-val b{color:#7ee787}
+  .measure-out{font-size:15px; font-weight:600; color:#7ee787; min-height:20px}
+  .hidden{display:none}
+  .hint{font-size:12px; color:var(--muted); margin-top:10px; line-height:1.5}
+  label.field{display:block; font-size:12px; color:var(--muted); margin:12px 0 5px}
+  select,input.text{width:100%; background:#0b0f14; border:1px solid var(--line);
+    color:var(--text); padding:10px; border-radius:8px; font-size:14px}
+  input.num{width:90px; background:#0b0f14; border:1px solid var(--line); color:var(--text);
+    padding:8px; border-radius:6px; font-size:14px}
+  .row{display:flex; gap:10px; align-items:center; flex-wrap:wrap}
+  .pill{font-size:11px; padding:3px 9px; border-radius:20px; background:#262d38; color:var(--muted)}
+  .pill.live{background:var(--danger); color:#fff; font-weight:700}
+  .pill.rec{background:var(--danger); color:#fff; font-weight:700; animation:blink 1s infinite}
+  @keyframes blink{50%{opacity:.4}}
+  footer{font-size:11px; color:var(--muted); margin-top:8px; text-align:center; line-height:1.6}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Телемед-трансляция</h1>
+    <span class="beta">БЕТА v2</span>
+  </header>
+  <div class="role" id="roleLabel">Выберите режим работы</div>
+
+  <!-- ВЫБОР РОЛИ -->
+  <div class="card" id="chooseCard">
+    <div class="choose">
+      <button onclick="startDoctor()">
+        <b>📡 Вещать (пункт УЗИ)</b>
+        <span>Захватить картинку с аппарата и получить ссылку для эксперта</span>
+      </button>
+      <button class="secondary" onclick="showViewerHint()">
+        <b>👁 Смотреть (эксперт)</b>
+        <span>Просмотр, запись, стоп-кадр и измерение по присланной ссылке</span>
+      </button>
+    </div>
+    <div class="hint" id="viewerHint" style="display:none">
+      Режим «Смотреть» открывается автоматически при переходе по присланной ссылке.
+      Попросите коллегу из пункта УЗИ прислать вам ссылку.
+    </div>
+  </div>
+
+  <!-- СТОРОНА ВРАЧА -->
+  <div class="card hidden" id="doctorCard">
+    <div class="row" style="justify-content:space-between; margin-bottom:12px">
+      <span class="role" style="margin:0">📡 Режим вещания — пункт УЗИ</span>
+      <span class="pill" id="docState">не активно</span>
+    </div>
+    <label class="field">Источник видео (выберите Game Capture Neo)</label>
+    <select id="videoSource"></select>
+    <label class="field">Микрофон</label>
+    <select id="audioSource"></select>
+    <div class="controls">
+      <button id="goLive" onclick="goLive()">Начать трансляцию</button>
+      <button class="secondary" onclick="refreshDevices()">Обновить список устройств</button>
+    </div>
+    <video id="localVideo" autoplay muted playsinline class="hidden" style="width:100%;border-radius:8px;margin-top:12px;aspect-ratio:16/9;object-fit:contain;background:#000"></video>
+    <div id="linkArea" class="hidden">
+      <label class="field">Ссылка для эксперта — скопируйте и отправьте (например, через Signal):</label>
+      <div class="linkbox">
+        <input id="shareLink" readonly>
+        <button onclick="copyLink()" id="copyBtn">Копировать</button>
+      </div>
+      <div class="hint">Пока вкладка открыта — трансляция идёт. Наденьте наушники, чтобы не было эха.</div>
+    </div>
+    <div class="status" id="docStatus">Выберите источник видео и нажмите «Начать трансляцию».</div>
+  </div>
+
+  <!-- СТОРОНА ЭКСПЕРТА -->
+  <div class="card hidden" id="viewerCard">
+    <div class="row" style="justify-content:space-between; margin-bottom:12px">
+      <span class="role" style="margin:0">👁 Просмотр консультации</span>
+      <span class="row" style="gap:6px">
+        <span class="pill" id="recState" style="display:none">● ЗАПИСЬ</span>
+        <span class="pill" id="viewState">подключение…</span>
+      </span>
+    </div>
+
+    <div class="stage">
+      <video id="remoteVideo" autoplay playsinline></video>
+      <canvas id="measureCanvas" class="hidden"></canvas>
+    </div>
+
+    <!-- Управление просмотром -->
+    <div class="controls">
+      <button id="micBtn" class="secondary" onclick="toggleViewerMic()">🎤 Включить микрофон</button>
+      <button id="freezeBtn" class="secondary" onclick="toggleFreeze()">⏸ Стоп-кадр</button>
+      <button id="recBtn" class="secondary" onclick="toggleRecord()">⏺ Запись</button>
+      <button class="secondary" onclick="fullscreenStage()">⛶ Во весь экран</button>
+    </div>
+
+    <!-- Панель измерения (появляется в стоп-кадре) -->
+    <div class="toolpanel hidden" id="measurePanel">
+      <h3>Измерение структуры</h3>
+      <div class="toolrow">
+        <span class="calib-val">Шаг 1 — калибровка:</span>
+        <button class="secondary" id="calibBtn" onclick="startCalibration()">Указать отрезок известной длины</button>
+        <input class="num" id="calibReal" type="number" step="0.1" placeholder="см" value="1">
+        <span class="calib-val">см по шкале аппарата</span>
+      </div>
+      <div class="toolrow">
+        <span class="calib-val">Статус калибровки: <b id="calibStatus">не задана</b></span>
+      </div>
+      <div class="toolrow">
+        <span class="calib-val">Шаг 2 — измерение:</span>
+        <button class="secondary" id="measBtn" onclick="startMeasure()" disabled>Провести линию измерения</button>
+        <button class="secondary" onclick="clearOverlay()">Очистить</button>
+      </div>
+      <div class="toolrow">
+        <span class="measure-out" id="measureOut"></span>
+      </div>
+      <div class="hint">
+        Калибровка: нажмите «Указать отрезок», проведите линию точно вдоль отметок шкалы аппарата
+        (например, между делениями 1 см), впишите реальную длину — программа запомнит масштаб.
+        Затем «Провести линию измерения» по нужной структуре — получите её размер.
+      </div>
+    </div>
+
+    <div class="status" id="viewStatus">Устанавливаем защищённое соединение…</div>
+    <div class="hint">Наденьте наушники, чтобы не было эха. Микрофон включите, если хотите говорить с врачом.</div>
+  </div>
+
+  <footer>
+    Бета-прототип. Соединение P2P, шифруется WebRTC. Публичный сигналинг PeerJS используется только для установления связи.<br>
+    Измерение по видеокадру — ориентировочное, зависит от точности калибровки по экранной шкале. Для клинически точных измерений используйте DICOM-инструменты аппарата.<br>
+    Не для клинического применения без обезличивания данных и юридического оформления.
+  </footer>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let peer=null, localStream=null;
+const params = new URLSearchParams(location.search);
+const watchId = params.get('watch');
+function setStatus(el,msg,cls){ el.textContent=msg; el.className='status'+(cls?(' '+cls):''); }
+
+// Конфигурация ICE: STUN для поиска пути + бесплатный публичный TURN (Open Relay)
+// как ретранслятор, когда прямое P2P-соединение невозможно (разные сети, firewall).
+const PEER_CONFIG = {
+  config: {
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      {
+        urls: 'turn:openrelay.metered.ca:80',
+        username: 'openrelayproject',
+        credential: 'openrelayproject'
+      },
+      {
+        urls: 'turn:openrelay.metered.ca:443',
+        username: 'openrelayproject',
+        credential: 'openrelayproject'
+      },
+      {
+        urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+        username: 'openrelayproject',
+        credential: 'openrelayproject'
+      }
+    ]
+  }
+};
+
+/* ===== ВРАЧ ===== */
+async function startDoctor(){
+  $('chooseCard').classList.add('hidden');
+  $('doctorCard').classList.remove('hidden');
+  $('roleLabel').textContent='Пункт УЗИ — вы вещаете картинку эксперту';
+  await refreshDevices();
+}
+function showViewerHint(){ $('viewerHint').style.display='block'; }
+async function refreshDevices(){
+  try{ const t=await navigator.mediaDevices.getUserMedia({video:true,audio:true}); t.getTracks().forEach(x=>x.stop()); }
+  catch(e){ setStatus($('docStatus'),'Нужно разрешить доступ к камере и микрофону.','err'); return; }
+  const devices=await navigator.mediaDevices.enumerateDevices();
+  const vsel=$('videoSource'),asel=$('audioSource'); vsel.innerHTML='';asel.innerHTML='';
+  devices.forEach(d=>{
+    if(d.kind==='videoinput'){const o=document.createElement('option');o.value=d.deviceId;o.textContent=d.label||'Видео';if(/neo|elgato|capture/i.test(d.label))o.selected=true;vsel.appendChild(o);}
+    if(d.kind==='audioinput'){const o=document.createElement('option');o.value=d.deviceId;o.textContent=d.label||'Микрофон';asel.appendChild(o);}
+  });
+  setStatus($('docStatus'),'Устройства найдены. Проверьте выбор Neo и нажмите «Начать трансляцию».','ok');
+}
+async function goLive(){
+  $('goLive').disabled=true;
+  try{
+    const vId=$('videoSource').value,aId=$('audioSource').value;
+    localStream=await navigator.mediaDevices.getUserMedia({
+      video:{deviceId:vId?{exact:vId}:undefined,width:{ideal:1280},height:{ideal:720}},
+      audio:{deviceId:aId?{exact:aId}:undefined,echoCancellation:true,noiseSuppression:true}
+    });
+  }catch(e){ setStatus($('docStatus'),'Не удалось получить видео/звук: '+e.message,'err'); $('goLive').disabled=false; return; }
+  const lv=$('localVideo'); lv.srcObject=localStream; lv.classList.remove('hidden');
+  peer=new Peer(PEER_CONFIG);
+  peer.on('open',id=>{
+    $('shareLink').value=location.origin+location.pathname+'?watch='+id;
+    $('linkArea').classList.remove('hidden');
+    $('docState').className='pill live'; $('docState').textContent='LIVE';
+    setStatus($('docStatus'),'Трансляция активна. Отправьте ссылку эксперту.','ok');
+  });
+  peer.on('call',call=>{
+    call.answer(localStream);
+    setStatus($('docStatus'),'Эксперт подключился. Идёт консультация.','ok');
+    call.on('stream',remote=>{
+      let a=$('viewerAudio'); if(!a){a=document.createElement('audio');a.id='viewerAudio';a.autoplay=true;document.body.appendChild(a);}
+      a.srcObject=remote;
+    });
+    call.on('close',()=>setStatus($('docStatus'),'Эксперт отключился. Ссылка ещё активна.','warn'));
+  });
+  peer.on('error',e=>setStatus($('docStatus'),'Ошибка связи: '+e.type,'err'));
+}
+function copyLink(){ const i=$('shareLink');i.select();navigator.clipboard.writeText(i.value).then(()=>{$('copyBtn').textContent='Скопировано ✓';setTimeout(()=>$('copyBtn').textContent='Копировать',1800);}); }
+
+/* ===== ЭКСПЕРТ ===== */
+let viewerMicStream=null, viewerCall=null, viewerPeer=null, remoteStream=null;
+
+async function startViewer(hostId){
+  $('chooseCard').classList.add('hidden');
+  $('viewerCard').classList.remove('hidden');
+  $('roleLabel').textContent='Просмотр телемед-консультации';
+  viewerPeer=new Peer(PEER_CONFIG);
+  viewerPeer.on('open',()=>connectToHost(hostId,null));
+  viewerPeer.on('error',e=>{ setStatus($('viewStatus'),'Не удалось подключиться: '+e.type+'. Проверьте ссылку.','err'); $('viewState').textContent='ошибка'; });
+}
+function connectToHost(hostId,outStream){
+  const empty=outStream||new MediaStream();
+  viewerCall=viewerPeer.call(hostId,empty);
+  if(!viewerCall){ setStatus($('viewStatus'),'Ссылка недействительна или трансляция завершена.','err'); return; }
+  viewerCall.on('stream',stream=>{
+    remoteStream=stream;
+    const rv=$('remoteVideo');
+    rv.srcObject=stream;
+    $('viewState').textContent='LIVE'; $('viewState').className='pill live';
+    setStatus($('viewStatus'),'Соединение установлено. Вы видите трансляцию.','ok');
+    // принудительный запуск; если браузер блокирует автозапуск — просим тапнуть
+    rv.play().catch(()=>{
+      setStatus($('viewStatus'),'Нажмите на видео, чтобы запустить просмотр.','warn');
+      const once=()=>{ rv.play(); rv.removeEventListener('click',once); document.removeEventListener('click',once); };
+      rv.addEventListener('click',once);
+      document.addEventListener('click',once,{once:true});
+    });
+  });
+  viewerCall.on('close',()=>{ $('viewState').textContent='завершено'; setStatus($('viewStatus'),'Трансляция завершена.','warn'); });
+  viewerCall.on('error',()=>setStatus($('viewStatus'),'Обрыв соединения.','err'));
+  // диагностика состояния соединения
+  setTimeout(()=>{
+    const pc = viewerCall.peerConnection;
+    if(!pc) return;
+    pc.oniceconnectionstatechange=()=>{
+      const s=pc.iceConnectionState;
+      if(s==='checking') setStatus($('viewStatus'),'Устанавливаем соединение (проверка сети)…','warn');
+      if(s==='failed') setStatus($('viewStatus'),'Не удалось установить прямое соединение. Сеть блокирует связь.','err');
+      if(s==='disconnected') setStatus($('viewStatus'),'Соединение прервано, пробуем восстановить…','warn');
+    };
+  },500);
+}
+async function toggleViewerMic(){
+  if(viewerMicStream){ viewerMicStream.getTracks().forEach(t=>t.stop()); viewerMicStream=null;
+    $('micBtn').textContent='🎤 Включить микрофон'; $('micBtn').classList.add('secondary'); return; }
+  try{
+    viewerMicStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}});
+    $('micBtn').textContent='🔴 Микрофон включён'; $('micBtn').classList.remove('secondary');
+    if(viewerCall) viewerCall.close();
+    connectToHost(watchId,viewerMicStream);
+  }catch(e){ setStatus($('viewStatus'),'Микрофон недоступен: '+e.message,'err'); }
+}
+
+/* ===== ЗАПИСЬ ===== */
+let mediaRecorder=null, recChunks=[];
+function toggleRecord(){
+  if(mediaRecorder && mediaRecorder.state!=='inactive'){
+    mediaRecorder.stop(); return;
+  }
+  if(!remoteStream){ setStatus($('viewStatus'),'Нет потока для записи.','err'); return; }
+  recChunks=[];
+  // пишем видео эксперта + при желании его микрофон уже в потоке врача; тут пишем входящее видео
+  let mime='video/webm;codecs=vp9,opus';
+  if(!MediaRecorder.isTypeSupported(mime)) mime='video/webm';
+  try{ mediaRecorder=new MediaRecorder(remoteStream,{mimeType:mime}); }
+  catch(e){ setStatus($('viewStatus'),'Запись не поддерживается этим браузером: '+e.message,'err'); return; }
+  mediaRecorder.ondataavailable=e=>{ if(e.data.size>0) recChunks.push(e.data); };
+  mediaRecorder.onstop=()=>{
+    const blob=new Blob(recChunks,{type:'video/webm'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    const ts=new Date().toISOString().replace(/[:.]/g,'-').slice(0,19);
+    a.href=url; a.download='consultation_'+ts+'.webm';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+    $('recState').style.display='none';
+    $('recBtn').textContent='⏺ Запись'; $('recBtn').classList.remove('danger'); $('recBtn').classList.add('secondary');
+    setStatus($('viewStatus'),'Запись сохранена в загрузки.','ok');
+  };
+  mediaRecorder.start();
+  $('recState').style.display='inline-block'; $('recState').className='pill rec';
+  $('recBtn').textContent='⏹ Остановить запись'; $('recBtn').classList.remove('secondary'); $('recBtn').classList.add('danger');
+  setStatus($('viewStatus'),'Идёт запись консультации…','warn');
+}
+
+/* ===== СТОП-КАДР + ИЗМЕРЕНИЕ ===== */
+const canvas=$('measureCanvas');
+let frozen=false, ctx=null;
+let calibPxPerCm=null;          // масштаб: пикселей на 1 см
+let mode=null;                  // 'calib' | 'measure' | null
+let startPt=null, curPt=null, drawnLine=null;
+
+function toggleFreeze(){
+  const v=$('remoteVideo');
+  if(!frozen){
+    if(!remoteStream){ setStatus($('viewStatus'),'Нет потока.','err'); return; }
+    // рисуем текущий кадр в canvas
+    canvas.width=v.videoWidth||1280; canvas.height=v.videoHeight||720;
+    ctx=canvas.getContext('2d');
+    ctx.drawImage(v,0,0,canvas.width,canvas.height);
+    canvas.classList.remove('hidden');
+    v.pause();
+    frozen=true;
+    $('freezeBtn').textContent='▶ Возобновить'; $('freezeBtn').classList.remove('secondary'); $('freezeBtn').classList.add('danger');
+    $('measurePanel').classList.remove('hidden');
+    setStatus($('viewStatus'),'Стоп-кадр. Можно калибровать и измерять.','ok');
+  }else{
+    canvas.classList.add('hidden');
+    v.play();
+    frozen=false; mode=null; drawnLine=null;
+    $('freezeBtn').textContent='⏸ Стоп-кадр'; $('freezeBtn').classList.add('secondary'); $('freezeBtn').classList.remove('danger');
+    $('measurePanel').classList.add('hidden');
+  }
+}
+function redraw(){
+  const v=$('remoteVideo');
+  ctx.drawImage(v,0,0,canvas.width,canvas.height);
+  if(drawnLine){
+    const [a,b]=drawnLine;
+    ctx.strokeStyle= mode==='calib' ? '#e3b341' : '#2ea043';
+    ctx.lineWidth=Math.max(2,canvas.width/500);
+    ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+    // засечки на концах
+    [a,b].forEach(p=>{ ctx.beginPath(); ctx.arc(p.x,p.y,ctx.lineWidth*1.5,0,7); ctx.fillStyle=ctx.strokeStyle; ctx.fill(); });
+  }
+}
+function canvasPoint(ev){
+  const r=canvas.getBoundingClientRect();
+  // учёт object-fit:contain — вычисляем реальную область картинки
+  const scale=Math.min(r.width/canvas.width, r.height/canvas.height);
+  const dispW=canvas.width*scale, dispH=canvas.height*scale;
+  const offX=(r.width-dispW)/2, offY=(r.height-dispH)/2;
+  const cx=(ev.clientX-r.left-offX)/scale;
+  const cy=(ev.clientY-r.top-offY)/scale;
+  return {x:cx,y:cy};
+}
+function startCalibration(){ mode='calib'; drawnLine=null; setStatus($('viewStatus'),'Проведите линию вдоль известного отрезка шкалы аппарата.','warn'); }
+function startMeasure(){ if(!calibPxPerCm){setStatus($('viewStatus'),'Сначала калибровка.','err');return;} mode='measure'; drawnLine=null; setStatus($('viewStatus'),'Проведите линию по измеряемой структуре.','warn'); }
+function clearOverlay(){ drawnLine=null; if(frozen)redraw(); $('measureOut').textContent=''; }
+
+canvas.addEventListener('pointerdown',ev=>{ if(!frozen||!mode)return; startPt=canvasPoint(ev); curPt=startPt; drawnLine=[startPt,curPt]; redraw(); });
+canvas.addEventListener('pointermove',ev=>{ if(!frozen||!mode||!startPt)return; curPt=canvasPoint(ev); drawnLine=[startPt,curPt]; redraw(); });
+canvas.addEventListener('pointerup',ev=>{
+  if(!frozen||!mode||!startPt)return;
+  curPt=canvasPoint(ev); drawnLine=[startPt,curPt]; redraw();
+  const dx=curPt.x-startPt.x, dy=curPt.y-startPt.y;
+  const px=Math.sqrt(dx*dx+dy*dy);
+  if(mode==='calib'){
+    const realCm=parseFloat($('calibReal').value)||1;
+    calibPxPerCm=px/realCm;
+    $('calibStatus').textContent=calibPxPerCm.toFixed(1)+' px/см';
+    $('measBtn').disabled=false;
+    setStatus($('viewStatus'),'Калибровка задана. Теперь можно измерять.','ok');
+  }else if(mode==='measure'){
+    const cm=px/calibPxPerCm;
+    const mm=cm*10;
+    $('measureOut').textContent='Размер: '+cm.toFixed(2)+' см  ('+mm.toFixed(1)+' мм)';
+  }
+  startPt=null; mode=null;
+});
+
+function fullscreenStage(){ document.querySelector('.stage').requestFullscreen(); }
+
+/* ===== АВТОСТАРТ ===== */
+if(watchId){ $('chooseCard').classList.add('hidden'); startViewer(watchId); }
+</script>
+</body>
+</html>
